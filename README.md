@@ -21,7 +21,7 @@ Open the local address printed by Vite. For validation, run the following comman
 npm run typecheck
 npm test
 npm run build
-npx playwright install chromium
+npx playwright install chromium firefox webkit
 npm run e2e
 ```
 

@@ -121,8 +121,10 @@ test('imprisonment, changing and canceling removal previews, and atomic undo/red
   const after = replay([...actions, action])
   await verifySaved(page, after)
   await page.getByRole('button', { name: 'Undo' }).click()
+  await expect(page.getByText('42 turns')).toBeVisible()
   await verifySaved(page, replay(actions))
   await page.getByRole('button', { name: 'Redo' }).click()
+  await expect(page.getByText('43 turns')).toBeVisible()
   await verifySaved(page, after)
 })
 
@@ -189,7 +191,56 @@ test('battle fits the viewport, passes axe checks, and can produce screenshots',
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
   const findings = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa']).analyze()
   expect(findings.violations).toEqual([])
-  if (process.env.LATRUNCULI_SCREENSHOTS) {
+  if (process.env.LATRUNCULI_SCREENSHOTS && ['desktop', 'mobile'].includes(info.project.name)) {
     await page.screenshot({ path: `${process.env.LATRUNCULI_SCREENSHOTS}/latrunculi-${info.project.name}.png`, fullPage: true, animations: 'disabled' })
   }
+})
+
+test('menu, deployment, settings, guide and confirmation pass axe; dialog restores focus', async ({ page }) => {
+  const scan = async () => {
+    const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa']).analyze()
+    expect(results.violations).toEqual([])
+  }
+  await scan()
+  await page.getByRole('button', { name: 'New local game' }).click()
+  await square(page, 'd4').click()
+  await scan()
+  const leave = page.getByRole('button', { name: 'Exit to menu' })
+  await leave.focus()
+  await page.keyboard.press('Enter')
+  await expect(page.getByRole('dialog')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Keep playing' })).toBeFocused()
+  await scan()
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('dialog')).toBeHidden()
+  await expect(leave).toBeFocused()
+  await page.getByRole('button', { name: 'Settings', exact: true }).click()
+  await scan()
+  await page.getByRole('button', { name: 'How to play', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'How to play' })).toBeVisible()
+  await scan()
+})
+
+test('mobile turn controls follow visual keyboard order; reduced motion suppresses effects', async ({ page, isMobile }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await upload(page, gameFile(rescueLog()))
+  await square(page, 'c2').click()
+  const cancel = page.getByRole('button', { name: 'Cancel selection' })
+  const board = page.getByRole('grid', { name: 'Game board' })
+  expect(await cancel.evaluate(element =>
+    Boolean(element.compareDocumentPosition(document.querySelector('[role=grid]')!) & Node.DOCUMENT_POSITION_FOLLOWING),
+  )).toBe(true)
+  if (isMobile) {
+    const card = await cancel.boundingBox()
+    const playingArea = await board.boundingBox()
+    expect(card!.y).toBeLessThan(playingArea!.y)
+  }
+  await cancel.focus()
+  await page.keyboard.press('Tab')
+  await expect(square(page, 'c2')).toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect(cancel).toBeHidden()
+  await square(page, 'c2').click()
+  await square(page, 'c3').click()
+  expect(await square(page, 'd4').locator('.piece-holder').evaluate(element => getComputedStyle(element).animationName)).toBe('none')
 })

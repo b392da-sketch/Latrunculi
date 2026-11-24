@@ -5,7 +5,9 @@ import { parseSquare } from '../src/engine/index.js'
 import { App } from '../src/web/App.js'
 import { Board } from '../src/web/Board.js'
 import { defaults, saveKey } from '../src/web/match.js'
-import { replay, rescueLog } from './web-fixtures.js'
+import { gameFile, replay, rescueLog } from './web-fixtures.js'
+
+import { quietHistory } from './history-benchmark-fixtures.js'
 
 afterEach(() => { cleanup(); localStorage.clear() })
 
@@ -33,10 +35,25 @@ it('provides roving focus with arrow navigation in board order', () => {
   expect(board[parseSquare('d4')]?.status).toBe('imprisoned')
 })
 
-it('reports a corrupted browser save without opening a match', () => {
+it('reports a corrupted browser save without opening a match', async () => {
   localStorage.setItem(saveKey, '{')
   render(<App />)
   fireEvent.click(screen.getByRole('button', { name: 'Continue saved game' }))
-  expect(screen.getByRole('alert').textContent).toContain('not valid JSON')
+  expect((await screen.findByRole('alert')).textContent).toContain('not valid JSON')
   expect(screen.queryByRole('grid')).toBeNull()
+})
+
+
+it('renders a bounded move-history page while retaining older moves', async () => {
+  localStorage.setItem(saveKey, gameFile(quietHistory(100)))
+  render(<App />)
+  fireEvent.click(screen.getByRole('button', { name: 'Continue saved game' }))
+  await screen.findByText('100 turns')
+  expect(screen.getAllByRole('listitem')).toHaveLength(60)
+  fireEvent.click(screen.getByRole('button', { name: 'Earlier moves' }))
+  expect(screen.getAllByRole('listitem')).toHaveLength(40)
+  expect(screen.getByText('1.')).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: 'Later moves' }))
+  expect(screen.getAllByRole('listitem')).toHaveLength(60)
+  expect(screen.getByText('100 turns')).toBeTruthy()
 })

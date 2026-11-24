@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { formatAction, formatEvent, legalActions, mandatoryRemovals, squareName } from '../engine/index.js'
 import type { Action, GameEvent, GameState, Player, Square } from '../engine/index.js'
 import { Board, Piece } from './Board.js'
-import { commit, current, defaults, exportMatch, importMatch, newMatch, preferencesKey, readPreferences, saveKey, seek } from './match.js'
+import { commit, current, defaults, exceedsImportBytes, exportMatch, importMatchAsync, maxImportActions, maxImportBytes, newMatch, preferencesKey, readPreferences, saveKey, seekAsync } from './match.js'
 import type { Match, Preferences } from './match.js'
 import { describeEvent, outcomeReason, playerName } from './presentation.js'
 import { Reference } from './Reference.js'
@@ -10,6 +10,7 @@ import { Reference } from './Reference.js'
 type Page = 'menu' | 'game' | 'guide' | 'history' | 'settings'
 type BattleAction = Extract<Action, { type: 'battle' }>
 const players = ['white', 'black'] as const
+const historyPageSize = 60
 
 function loadPreferences(): Preferences {
   try {
@@ -50,6 +51,10 @@ export function App() {
   })
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
+  const [historyPage, setHistoryPage] = useState(0)
+  const [importBusy, setImportBusy] = useState(false)
+  const [historyBusy, setHistoryBusy] = useState(false)
+  const pendingReplay = useRef<AbortController>(null)
   const [events, setEvents] = useState<readonly GameEvent[]>([])
   const [selected, setSelected] = useState<Square>()
   const [removed, setRemoved] = useState<Square>()
@@ -59,20 +64,22 @@ export function App() {
   const historyEnd = useRef<HTMLDivElement>(null)
   const boardKey = useRef(0)
   const state = current(match)
-  const actions = page === 'game' ? legalActions(state) : []
+  const actions = page === 'game' && !historyBusy ? legalActions(state) : []
   const removals = mandatoryRemovals(state)
   const compatible = actions.filter((action): action is BattleAction =>
     action.type === 'battle' && action.remove === removed)
   const moving = compatible.filter(action => action.path?.[0] === selected && selected !== undefined)
   const destinations = new Set(state.phase === 'deployment'
     ? [] : moving.flatMap(action => action.path?.at(-1) ?? []))
-  const lastTransition = match.timeline[match.cursor - 1]
+  const lastEvents = match.timeline[match.cursor - 1]
+  const historyEndIndex = Math.max(0, match.cursor - historyPage * historyPageSize)
+  const historyStartIndex = Math.max(0, historyEndIndex - historyPageSize)
   const lastAction = match.actions[match.cursor - 1]
   const last = lastAction?.type === 'place' ? [lastAction.at] : lastAction?.path
   const placed = 40 - state.reserves.white - state.reserves.black
   const terminalRemoval = removed === undefined ? undefined : compatible.find(action => !action.path)
   const hasOutcome = state.outcome !== null
-  const effects = lastTransition?.events.filter(event =>
+  const effects = lastEvents?.filter(event =>
     event.type === 'imprisonment' || event.type === 'liberation' || event.type === 'removal')
     .map(describeEvent).join(' ')
 
@@ -85,7 +92,8 @@ export function App() {
   }, [confirmation])
   useEffect(() => {
     if (historyEnd.current) historyEnd.current.scrollTop = historyEnd.current.scrollHeight
-  }, [match.cursor, page])
+  }, [match.cursor, page, historyPage])
+  useEffect(() => () => pendingReplay.current?.abort(), [])
 
   useEffect(() => {
     if (!events.length) return
@@ -99,12 +107,28 @@ export function App() {
     setProposal(undefined)
   }
 
+  function cancelReplay() {
+    pendingReplay.current?.abort()
+    pendingReplay.current = null
+    setHistoryBusy(false)
+    setImportBusy(false)
+  }
+
+  function beginReplay() {
+    cancelReplay()
+    clearFeedback()
+    const request = new AbortController()
+    pendingReplay.current = request
+    return request.signal
+  }
+
   function clearFeedback() {
     setMessage('')
     setError('')
   }
 
   function show(next: Page) {
+    cancelReplay()
     clearFeedback()
     if (page === 'menu' || page === 'game') setReturnTo(page)
     setPage(next)
@@ -118,8 +142,10 @@ export function App() {
   }
 
   function start() {
+    cancelReplay()
     proceed('Start a new game?', () => {
       setMatch(newMatch())
+      setHistoryPage(0)
       boardKey.current++
       clearSelection()
       clearFeedback()
@@ -129,6 +155,7 @@ export function App() {
   }
 
   function leave() {
+    cancelReplay()
     proceed('Return to the main menu?', () => {
       setPage('menu')
       setReturnTo('menu')
@@ -138,10 +165,12 @@ export function App() {
   }
 
   function submit(action: Action) {
+    cancelReplay()
     try {
       const next = commit(match, action)
       setMatch(next)
-      setEvents(next.timeline[next.cursor - 1]!.events)
+      setHistoryPage(0)
+      setEvents(next.timeline[next.cursor - 1]!)
       clearFeedback()
       clearSelection()
     } catch {
@@ -151,7 +180,7 @@ export function App() {
   }
 
   function square(at: Square) {
-    if (state.outcome) return
+    if (state.outcome || historyBusy) return
     if (state.phase === 'deployment') {
       const placement = actions.find(action => action.type === 'place' && action.at === at)
       if (placement) submit(placement)
@@ -175,16 +204,28 @@ export function App() {
     else if (compatible.some(action => action.path?.[0] === at)) setSelected(at)
   }
 
-  function undoRedo(offset: number) {
-    setMatch(seek(match, match.cursor + offset))
+  async function undoRedo(offset: number) {
+    const signal = beginReplay()
+    setHistoryBusy(true)
+    setHistoryPage(0)
     clearSelection()
-    clearFeedback()
     setEvents([])
+    try {
+      const next = await seekAsync(match, match.cursor + offset, signal)
+      if (!signal.aborted) setMatch(next)
+    } catch {
+      if (!signal.aborted) setError('That position could not be restored.')
+    } finally {
+      if (!signal.aborted) setHistoryBusy(false)
+    }
   }
 
-  function restore(json: string) {
+  async function restore(json: string, signal: AbortSignal) {
+    setImportBusy(true)
     try {
-      const restored = importMatch(json)
+      const restored = await importMatchAsync(json, signal)
+      if (signal.aborted) return
+      setHistoryPage(0)
       setMatch(restored.match)
       setPreferences(restored.preferences)
       boardKey.current++
@@ -194,13 +235,21 @@ export function App() {
       setPage('game')
       setMessage('Match restored.')
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'This match could not be loaded.')
+      if (!signal.aborted) setError(cause instanceof Error ? cause.message : 'This match could not be loaded.')
+    } finally {
+      if (!signal.aborted) setImportBusy(false)
     }
   }
 
   function save() {
+    cancelReplay()
     try {
-      localStorage.setItem(saveKey, exportMatch(match, preferences))
+      const json = exportMatch(match, preferences)
+      if (match.actions.length > maxImportActions || exceedsImportBytes(json)) {
+        setError('This match exceeds the resume limit. Export JSON to keep a copy.')
+        return
+      }
+      localStorage.setItem(saveKey, json)
       setSaved(true)
       setMessage('Match saved on this device.')
       setError('')
@@ -208,37 +257,54 @@ export function App() {
   }
 
   function resume() {
+    const signal = beginReplay()
     try {
       const json = localStorage.getItem(saveKey)
-      if (json) restore(json)
+      if (json) void restore(json, signal)
       else setError('There is no saved match on this device.')
     } catch { setError('The saved match could not be read.') }
   }
 
   async function readFile(file: File | undefined) {
     if (!file) return
-    if (file.size > 5 * 1024 * 1024) { setError('The game file exceeds 5 MB.'); return }
+    const signal = beginReplay()
+    if (file.size > maxImportBytes) { setError('The game file exceeds 5 MiB.'); return }
+    setImportBusy(true)
     try {
       const json = await file.text()
-      proceed('Replace this match with the imported game?', () => restore(json))
-    } catch { setError('The game file could not be read.') }
+      if (signal.aborted) return
+      setImportBusy(false)
+      proceed('Replace this match with the imported game?', () => {
+        if (!signal.aborted) void restore(json, signal)
+      })
+    } catch {
+      if (!signal.aborted) {
+        setImportBusy(false)
+        setError('The game file could not be read.')
+      }
+    }
   }
 
   function download() {
-    const url = URL.createObjectURL(new Blob([exportMatch(match, preferences)], { type: 'application/json' }))
+    cancelReplay()
+    const file = new Blob([exportMatch(match, preferences)], { type: 'application/json' })
+    const canResume = match.actions.length <= maxImportActions && file.size <= maxImportBytes
+    const url = URL.createObjectURL(file)
     const link = document.createElement('a')
     link.href = url
     link.download = 'latrunculi-game.json'
+    document.body.append(link)
     link.click()
-    window.setTimeout(() => URL.revokeObjectURL(url), 0)
-    setMessage('Game file exported.')
+    link.remove()
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+    setMessage(canResume ? 'Game file exported.' : 'Game file exported. It exceeds this version’s import limit.')
     setError('')
   }
 
   const upload = <label className="button file-button">Import JSON<input type="file" accept=".json,application/json"
     onChange={event => { void readFile(event.currentTarget.files?.[0]); event.currentTarget.value = '' }} /></label>
 
-  const instruction = hasOutcome ? 'Match complete' : state.phase === 'deployment' ? 'Place a counter on an empty square.'
+  const instruction = historyBusy ? 'Restoring position…' : hasOutcome ? 'Match complete' : state.phase === 'deployment' ? 'Place a counter on an empty square.'
     : terminalRemoval ? 'Confirm the final removal.'
     : removals.length > 0 && removed === undefined ? 'Choose an enemy prisoner to remove.'
     : proposal ? 'Review the marked leap path.'
@@ -281,6 +347,18 @@ export function App() {
       </section>}
 
       {page === 'game' && <section className="match-shell" aria-label="Local game">
+        <div className="turn-card">
+          <p className="eyebrow">{hasOutcome ? 'Result' : removals.length > 0 ? 'Mandatory removal' : 'Current turn'}</p>
+          <h2>{state.outcome ? state.outcome.winner ? `${playerName[state.outcome.winner]} wins` : 'Draw' : `${playerName[state.turn]} to play`}</h2>
+          <p role="status">{state.outcome ? outcomeReason[state.outcome.reason] : instruction}</p>
+          {removed !== undefined && <p className="pending">Removal preview · {squareName(removed)}</p>}
+          {proposal && <p className="pending">Path · {formatAction(proposal)}</p>}
+          {(proposal || terminalRemoval) && <button className="button primary compact"
+            onClick={() => submit((proposal ?? terminalRemoval)!)}>{terminalRemoval ? 'Confirm removal' : 'Confirm leap'}</button>}
+          {(selected !== undefined || removed !== undefined || proposal) &&
+            <button className="quiet cancel" onClick={clearSelection}>Cancel selection</button>}
+          {state.outcome && <button className="button primary compact" onClick={start}>New local game</button>}
+        </div>
         <div className="table-side">
           <div className="table-heading">
             <div><p className="eyebrow">Local match <span aria-hidden="true">/</span> Seneca rules</p>
@@ -302,18 +380,6 @@ export function App() {
           {effects && <p className="table-effects">{effects}</p>}
         </div>
         <aside className="match-panel">
-          <div className="turn-card">
-            <p className="eyebrow">{hasOutcome ? 'Result' : removals.length > 0 ? 'Mandatory removal' : 'Current turn'}</p>
-            <h2>{state.outcome ? state.outcome.winner ? `${playerName[state.outcome.winner]} wins` : 'Draw' : `${playerName[state.turn]} to play`}</h2>
-            <p role="status">{state.outcome ? outcomeReason[state.outcome.reason] : instruction}</p>
-            {removed !== undefined && <p className="pending">Removal preview · {squareName(removed)}</p>}
-            {proposal && <p className="pending">Path · {formatAction(proposal)}</p>}
-            {(proposal || terminalRemoval) && <button className="button primary compact"
-              onClick={() => submit((proposal ?? terminalRemoval)!)}>{terminalRemoval ? 'Confirm removal' : 'Confirm leap'}</button>}
-            {(selected !== undefined || removed !== undefined || proposal) &&
-              <button className="quiet cancel" onClick={clearSelection}>Cancel selection</button>}
-            {state.outcome && <button className="button primary compact" onClick={start}>New local game</button>}
-          </div>
           <div className="scoreboard" aria-label={hasOutcome ? 'Final scores' : 'Scores'}>
             {players.map(player => <PlayerCard key={player} player={player} state={state} />)}
           </div>
@@ -321,17 +387,24 @@ export function App() {
             <div className="history-heading"><h2>Move history</h2><span>{match.cursor} turns</span></div>
             <div className="log" ref={historyEnd} tabIndex={0} aria-label="Committed moves">
               {match.cursor === 0 ? <p className="empty-log">Moves will appear here.</p> : <ol>
-                {match.actions.slice(0, match.cursor).map((action, index) => {
-                  const effects = match.timeline[index]!.events.flatMap(event =>
+                {match.actions.slice(historyStartIndex, historyEndIndex).map((action, offset) => {
+                  const index = historyStartIndex + offset
+                  const effects = match.timeline[index]!.flatMap(event =>
                     event.type === 'imprisonment' || event.type === 'liberation' || event.type === 'termination'
                       ? formatEvent(event) ?? [] : [])
                   return <li key={index}><b>{index + 1}.</b><span>{formatAction(action)}</span><small>{effects.join(' ')}</small></li>
                 })}
               </ol>}
             </div>
+            {(historyStartIndex > 0 || historyPage > 0) && <div className="history-controls" aria-label="Move history pages">
+              <button className="button compact" disabled={historyStartIndex === 0}
+                onClick={() => setHistoryPage(historyPage + 1)}>Earlier moves</button>
+              <button className="button compact" disabled={historyPage === 0}
+                onClick={() => setHistoryPage(historyPage - 1)}>Later moves</button>
+            </div>}
             <div className="history-controls">
-              <button className="button compact" disabled={match.cursor === 0} onClick={() => undoRedo(-1)}>↶ Undo</button>
-              <button className="button compact" disabled={match.cursor === match.actions.length} onClick={() => undoRedo(1)}>↷ Redo</button>
+              <button className="button compact" disabled={historyBusy || match.cursor === 0} onClick={() => { void undoRedo(-1) }}>↶ Undo</button>
+              <button className="button compact" disabled={historyBusy || match.cursor === match.actions.length} onClick={() => { void undoRedo(1) }}>↷ Redo</button>
             </div>
           </div>
           <div className="match-controls">
@@ -341,12 +414,12 @@ export function App() {
             <button className="quiet" onClick={start}>New game</button>
             <button className="quiet" onClick={leave}>Exit to menu</button>
           </div>
-          <p className="sr-only" aria-live="polite">{lastTransition?.events.map(describeEvent).join(' ')}</p>
+          <p className="sr-only" aria-live="polite">{lastEvents?.map(describeEvent).join(' ')}</p>
         </aside>
       </section>}
 
       {(page === 'guide' || page === 'history' || page === 'settings') && <section className="secondary">
-        <button className="quiet back" onClick={() => setPage(returnTo === page ? 'menu' : returnTo)}>← Back</button>
+        <button className="quiet back" onClick={() => { cancelReplay(); setPage(returnTo === page ? 'menu' : returnTo) }}>← Back</button>
         {page === 'settings' ? <article className="reading">
           <p className="eyebrow">Local preferences</p><h1>Settings</h1>
           <div className="settings-list">
@@ -357,6 +430,9 @@ export function App() {
         </article> : <Reference history={page === 'history'} />}
       </section>}
 
+      {importBusy && <div className="feedback" role="status">
+        Loading match…<button className="quiet" onClick={cancelReplay} aria-label="Cancel import">×</button>
+      </div>}
       {(message || error) && <div className={`feedback ${error ? 'error' : ''}`} role={error ? 'alert' : 'status'}>
         {error || message}<button className="quiet" onClick={clearFeedback} aria-label="Dismiss message">×</button>
       </div>}
