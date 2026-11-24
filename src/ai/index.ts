@@ -1,0 +1,8 @@
+export { chooseAction } from './search.js'
+export { randomFor } from './random.js'
+export { deploymentWeights, makeEvaluator, tacticalWeights, terminalScore } from './evaluation.js'
+export { extractFeatures, featureBalance, probeMobility } from './features.js'
+export type { Feature, Features, Weights } from './features.js'
+export type { AiConfig, AiDecision, AiDiagnostics } from './types.js'
+export { runTournament, summarizeGames } from './diagnostics.js'
+export type { TournamentOptions } from './diagnostics.js'
