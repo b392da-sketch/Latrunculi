@@ -18,3 +18,5 @@ npm run simulate
 ```
 
 The separate simulation command runs 2,000 games with deterministic seeds 1–2,000. It chooses uniformly from the engine's representative legal actions and stops a simulation at 1,000 actions, including deployment. Its report counts truncated runs separately from canonical outcomes. The cap applies only to this validation run.
+
+`npm run diagnose` compares random and one-turn greedy play in three pairings. See the [M1 review results](docs/M1_REVIEW.md) for the protocol, findings, and terminal-state checks.

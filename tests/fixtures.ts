@@ -1,4 +1,4 @@
-import { createGame, parseSquare, positionKey } from '../src/engine/index.js'
+import { applyAction, createGame, parseSquare, positionKey } from '../src/engine/index.js'
 import type { Action, Counter, GameState, Player } from '../src/engine/index.js'
 
 export const sq = parseSquare
@@ -23,4 +23,21 @@ export function battle(white: string, black: string, turn: Player = 'white'): Ga
     ...createGame(), board, phase: 'battle', turn, removed, reserves: { white: 0, black: 0 },
   }
   return { ...state, repetitions: { [positionKey(state)]: 1 } }
+}
+
+/** Complete a real deployment while reserving named squares for a scripted test. */
+export function deployWith(white: string[], black: string[], vacant: string[] = []): GameState {
+  const unavailable = new Set([...white, ...black, ...vacant].map(sq))
+  const available = Array.from({ length: 64 }, (_, at) => at).filter(at => !unavailable.has(at))
+  const fill = (names: string[]) => [
+    ...names.map(sq), ...available.splice(0, 20 - names.length),
+  ]
+  const bySide = { white: fill(white), black: fill(black) }
+  let state = createGame()
+  for (let i = 0; i < 20; i++) {
+    for (const side of ['white', 'black'] as const) {
+      state = applyAction(state, { type: 'place', at: bySide[side][i]! }).state
+    }
+  }
+  return state
 }

@@ -105,11 +105,12 @@ function validateState(state: GameState): void {
   for (const [pastKey, count] of Object.entries(repetitions)) {
     requireSaved(battleKey.test(pastKey) && (count < 3 || (key === pastKey && outcome !== null)))
   }
-  // A removal that finishes the game can leave a position outside the
-  // repetition ledger because no complete movement turn followed it.
+  // Only a one-counter ending occurs during removal, before a new
+  // boundary is recorded. Other terminal outcomes must have a visit.
   const expected = boundaryOutcome({ ...state, outcome: null })
   if (outcome) {
     requireSaved(expected?.reason === outcome.reason && expected.winner === outcome.winner)
+    requireSaved(outcome.reason === 'one-counter' || repetitions[key] !== undefined)
   } else {
     requireSaved(!expected && repetitions[key] !== undefined)
   }

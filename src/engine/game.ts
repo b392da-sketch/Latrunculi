@@ -92,8 +92,7 @@ export function legalActions(state: GameState): Action[] {
   return removals.flatMap((remove): Action[] => {
     const next = removePrisoner(state, remove).state
     if (reachesOneCounter(next)) return [{ type: 'battle', remove }]
-    const paths = Array.from(moves(next), path => ({ type: 'battle' as const, remove, path }))
-    return paths.length > 0 ? paths : [{ type: 'battle', remove }]
+    return Array.from(moves(next), path => ({ type: 'battle', remove, path }))
   })
 }
 
@@ -116,13 +115,11 @@ export function applyAction(state: GameState, action: Action): Transition {
     ? { state, events: [] }
     : removePrisoner(state, action.remove)
 
-  if (action.remove !== undefined) {
-    const reason = reachesOneCounter(prepared.state) ? 'one-counter'
-      : moves(prepared.state).next().done ? 'immobilization' : null
-    if (reason) {
-      if (action.path !== undefined) throw new Error('Removal ends the game')
-      return finish(prepared.state, prepared.events, materialOutcome(prepared.state, reason))
-    }
+  // Both active captors can step into the vacated square. At most one of
+  // those steps can be barred by oscillation, so removal cannot immobilize.
+  if (action.remove !== undefined && reachesOneCounter(prepared.state)) {
+    if (action.path !== undefined) throw new Error('Removal ends the game')
+    return finish(prepared.state, prepared.events, materialOutcome(prepared.state, 'one-counter'))
   }
 
   const { board, movement, turn } = prepared.state

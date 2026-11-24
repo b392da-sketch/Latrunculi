@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run --exclude '**/*.simulation.test.ts'",
     "build": "tsc --project tsconfig.build.json",
-    "simulate": "vitest run --reporter=default tests/random.simulation.test.ts"
+    "simulate": "vitest run --reporter=default tests/random.simulation.test.ts",
+    "diagnose": "vitest run --reporter=default tests/gameplay.simulation.test.ts"
   },
   "devDependencies": {
     "@types/node": "24.19.2",
