@@ -1,6 +1,6 @@
-# Seneca implementation draft
+# Seneca rules
 
-Ruleset identifier `locus-ludi-seneca-v1`. This draft records the project brief. The Seneca text and diagrams must be reviewed before the engine implements it.
+Ruleset identifier `locus-ludi-seneca-v1`. This ruleset follows the Locus Ludi Seneca reconstruction. [Rule decisions](RULE_DECISIONS.md) records the provisional and modern conventions.
 
 ## Deployment
 
@@ -16,13 +16,13 @@ Move one active counter. A step goes one square orthogonally to a vacant square.
 
 The final destination of a move can establish new imprisonments. Two active counters of the moving side hold an enemy between them on an orthogonal line. At a corner, the two in-board orthogonal neighbors can instead form the pair. The board boundary supplies no captor. A prisoner occupies its square but cannot move or act as a captor.
 
-New imprisonments are triggered by the moving counter or a newly liberated friendly counter participating in the holding pair. Resolve each batch simultaneously. After movement or a batch, liberate prisoners with no remaining pair of active enemy captors. A prisoner with several pairs remains held as long as any pair survives. Continue processing newly liberated friendly captors until resolution stabilizes. Static geometry alone does not create custody, including when a counter voluntarily enters a square flanked by enemies.
+New imprisonments are triggered by the moving counter or a newly liberated friendly counter participating in the holding pair. Resolve each batch simultaneously. After each batch, including an empty initial batch, find all prisoners without a valid pair and liberate them simultaneously. A prisoner with several pairs remains held as long as any pair survives. Continue processing newly liberated friendly captors until resolution stabilizes. Static geometry alone does not create custody, including when a counter voluntarily enters a square flanked by enemies.
 
 ## Repetition and outcome
 
 For each side, forbid the same counter from moving A→B→A→B on three consecutive movement turns of that side. Moving a different counter or selecting a different destination breaks the pattern. Use a threefold draw for equivalent complete turn-boundary positions. Equivalence includes side to move, phase, reserves, counter ownership and status, and movement history relevant to legality. Internal identifiers alone do not make positions different.
 
-Ordinary termination occurs when a player has one counter remaining or the turn player has no legal movement after accounting for mandatory removal. Compare the number of enemies each player actually removed. The greater score wins and equal scores draw. Threefold repetition draws regardless of score. The canonical rules have no move limit.
+Ordinary termination occurs when a player has one counter remaining or the turn player has no legal movement after accounting for mandatory removal. Compare the number of enemies each player actually removed. The greater score wins and equal scores draw. Threefold repetition draws regardless of score. Resolve the ordinary end conditions first if they coincide with a repetition check. The canonical rules have no move limit.
 
 ## Display notation
 
