@@ -1,6 +1,6 @@
 # LATRVNCVLI
 
-LATRVNCVLI implements the Locus Ludi Seneca reconstruction of Ludus Latrunculorum, an ancient strategy board game. Play a local match in your browser with two players sharing a device. The strict TypeScript engine covers deployment, battle movement, imprisonment and rescue, removal, repetition and scoring.
+LATRVNCVLI implements the Locus Ludi Seneca reconstruction of Ludus Latrunculorum, an ancient strategy board game. Play locally with two people sharing a device, or select **Play the computer** and choose one of six opponents. Centurio is selected initially. Choose White, Black, or a random side. White places first. **Continue saved game** reopens the last match you saved, including its opponent and move history.
 
 - [Rules](docs/RULES.md) and [provisional decisions](docs/RULE_DECISIONS.md)
 - [Historical sources](docs/HISTORICAL_SOURCES.md)
@@ -8,6 +8,7 @@ LATRVNCVLI implements the Locus Ludi Seneca reconstruction of Ludus Latrunculoru
 - [Frontend architecture, persistence, and screenshots](docs/FRONTEND.md)
 - [Headless AI architecture](docs/AI_ARCHITECTURE.md) and [M3.1 research](docs/AI_RESEARCH.md) and [M3.2 research](docs/M3_2_RESEARCH.md)
 - [AI difficulty presets](docs/AI_DIFFICULTIES.md) and [M3.3 calibration](docs/M3_3_RESEARCH.md)
+- [Computer play, worker benchmarks, and screenshots](docs/M3_4_INTEGRATION.md)
 - [Roadmap](docs/ROADMAP.md) and [contributing](CONTRIBUTING.md)
 
 Use Node.js 24.

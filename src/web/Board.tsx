@@ -15,6 +15,7 @@ interface Props {
   route?: readonly Square[] | undefined
   last?: readonly Square[] | undefined
   events: readonly GameEvent[]
+  locked?: boolean
   onSquare: (at: Square) => void
   onCancel: () => void
 }
@@ -81,7 +82,8 @@ export function Board(props: Props) {
                 ref={node => { if (node) refs.current.set(at, node); else refs.current.delete(at) }}
                 tabIndex={focusAt === at ? 0 : -1}
                 onFocus={() => setFocused(at)} onKeyDown={event => keyNavigate(event, row * 8 + col)}
-                onClick={() => props.onSquare(at)}
+                aria-disabled={props.locked || undefined}
+                onClick={() => { if (!props.locked) props.onSquare(at) }}
                 className={[
                   'square', (row + col) % 2 ? 'deep' : 'light',
                   last?.includes(at) && 'last', selected === at && 'selected',

@@ -23,7 +23,7 @@ describe('match log persistence', () => {
 
   it.each([
     ['not valid JSON', '{'],
-    ['version', '{"version":2}'],
+    ['version', '{"version":3}'],
     ['cursor', gameFile([], 1)],
     ['position 2', gameFile([{ type: 'place', at: 0 }, { type: 'place', at: 0 }], 1)],
     ['position 1', gameFile([{ type: 'battle', path: [0, 1] }])],

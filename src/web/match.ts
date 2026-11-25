@@ -1,4 +1,6 @@
 import { applyAction, createGame } from '../engine/index.js'
+import { localConfig, readMatchConfig } from './match-config.js'
+import type { MatchConfig } from './match-config.js'
 import { validSquare } from '../engine/board.js'
 import type { Action, GameEvent, GameState, Player } from '../engine/index.js'
 
@@ -31,6 +33,7 @@ interface Checkpoints {
 
 export interface Match {
   firstPlayer: Player
+  config: MatchConfig
   actions: readonly Action[]
   cursor: number
   timeline: readonly (readonly GameEvent[])[]
@@ -40,10 +43,10 @@ export interface Match {
   recent: ReadonlyMap<number, GameState>
 }
 
-export function newMatch(firstPlayer: Player = 'white'): Match {
+export function newMatch(firstPlayer: Player = 'white', config: MatchConfig = localConfig): Match {
   const initial = createGame({ firstPlayer })
   return {
-    firstPlayer, actions: [], cursor: 0, timeline: [], initial, state: initial,
+    firstPlayer, config, actions: [], cursor: 0, timeline: [], initial, state: initial,
     checkpoints: { stride: initialStride, states: new Map() }, recent: new Map(),
   }
 }
@@ -119,8 +122,9 @@ export function seekAsync(match: Match, cursor: number, signal: AbortSignal): Pr
 }
 
 export function exportMatch(match: Match, preferences: Preferences): string {
-  const { firstPlayer, actions, cursor } = match
-  return JSON.stringify({ version: 1, firstPlayer, actions, cursor, preferences }, null, 2)
+  const { firstPlayer, actions, cursor, config } = match
+  const game = { firstPlayer, actions, cursor, preferences }
+  return JSON.stringify(config.mode === 'local' ? { version: 1, ...game } : { version: 2, ...game, config }, null, 2)
 }
 
 function record(value: unknown): Record<string, unknown> {
@@ -136,7 +140,7 @@ export function readPreferences(value: unknown): Preferences {
   return { coordinates, flipped, reducedMotion }
 }
 
-function readAction(raw: unknown): Action {
+export function readAction(raw: unknown): Action {
   const { type, at, remove, path } = record(raw)
   if (type === 'place' && validSquare(at)) return { type, at }
   if (type !== 'battle' || (remove !== undefined && !validSquare(remove)) ||
@@ -157,15 +161,16 @@ function* replayImport(json: string): Generator<void, Restored> {
   }
   let raw: unknown
   try { raw = JSON.parse(json) } catch { throw new Error('This file is not valid JSON.') }
-  const { version, firstPlayer, actions, cursor, preferences } = record(raw)
-  if (version !== 1) throw new Error('Unsupported game file version.')
+  const { version, firstPlayer, actions, cursor, preferences, config: rawConfig } = record(raw)
+  if (version !== 1 && version !== 2) throw new Error('Unsupported game file version.')
   if ((firstPlayer !== 'white' && firstPlayer !== 'black') || !Array.isArray(actions) ||
     typeof cursor !== 'number' || !Number.isInteger(cursor) || cursor < 0 || cursor > actions.length) {
     throw new Error('Invalid match configuration or history cursor.')
   }
   if (actions.length > maxImportActions) throw new Error('This browser can import up to 12,000 actions.')
   const settings = readPreferences(preferences)
-  const initialMatch = newMatch(firstPlayer)
+  const config = version === 2 ? readMatchConfig(rawConfig) : localConfig
+  const initialMatch = newMatch(firstPlayer, config)
   const { initial } = initialMatch
   const timeline: (readonly GameEvent[])[] = []
   const parsed: Action[] = []
@@ -191,7 +196,7 @@ function* replayImport(json: string): Generator<void, Restored> {
     yield
   }
   return {
-    match: { firstPlayer, initial, cursor, actions: parsed, timeline, state: selected, checkpoints, recent },
+    match: { firstPlayer, config, initial, cursor, actions: parsed, timeline, state: selected, checkpoints, recent },
     preferences: settings,
   }
 }

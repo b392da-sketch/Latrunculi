@@ -1,6 +1,8 @@
 import { defineConfig, devices } from '@playwright/test'
 
 const executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE
+const base = process.env.LATRUNCULI_PAGES_SMOKE ? '/Latrunculi/' : '/'
+const address = `http://127.0.0.1:4173${base}`
 const launchOptions = executablePath ? { executablePath } : {}
 
 export default defineConfig({
@@ -11,7 +13,7 @@ export default defineConfig({
   timeout: 60_000,
   reporter: 'list',
   use: {
-    baseURL: 'http://127.0.0.1:4173',
+    baseURL: address,
     trace: 'retain-on-failure',
   },
   projects: [
@@ -21,8 +23,8 @@ export default defineConfig({
     { name: 'mobile', use: { ...devices['Pixel 7'], launchOptions } },
   ],
   webServer: {
-    command: 'npm run preview -- --host 127.0.0.1 --port 4173 --strictPort',
-    url: 'http://127.0.0.1:4173',
+    command: `npm run preview -- --host 127.0.0.1 --port 4173 --strictPort --base=${base}`,
+    url: address,
     reuseExistingServer: !process.env.CI,
   },
 })

@@ -1,13 +1,19 @@
 import { useEffect, useRef, useState } from 'react'
 import { formatAction, formatEvent, legalActions, mandatoryRemovals, squareName } from '../engine/index.js'
 import type { Action, GameEvent, GameState, Player, Square } from '../engine/index.js'
+import { difficulties } from '../ai/difficulties.js'
+import { ComputerSetup } from './ComputerSetup.js'
+import { useComputerTurn } from './use-computer-turn.js'
+import type { WorkerFactory } from './computer-turn.js'
+import { actor, decisionCursor, localConfig } from './match-config.js'
+import type { MatchConfig } from './match-config.js'
 import { Board, Piece } from './Board.js'
 import { commit, current, defaults, exceedsImportBytes, exportMatch, importMatchAsync, maxImportActions, maxImportBytes, newMatch, preferencesKey, readPreferences, saveKey, seekAsync } from './match.js'
 import type { Match, Preferences } from './match.js'
 import { describeEvent, outcomeReason, playerName } from './presentation.js'
 import { Reference } from './Reference.js'
 
-type Page = 'menu' | 'game' | 'guide' | 'history' | 'settings'
+type Page = 'menu' | 'game' | 'guide' | 'history' | 'settings' | 'computer'
 type BattleAction = Extract<Action, { type: 'battle' }>
 const players = ['white', 'black'] as const
 const historyPageSize = 60
@@ -41,11 +47,13 @@ function PlayerCard({ player, state }: { player: Player; state: GameState }) {
   </div>
 }
 
-export function App() {
+export function App({ workerFactory }: { workerFactory?: WorkerFactory } = {}) {
   const [page, setPage] = useState<Page>('menu')
   const [returnTo, setReturnTo] = useState<Page>('menu')
   const [match, setMatch] = useState<Match>(() => newMatch())
   const [preferences, setPreferences] = useState(loadPreferences)
+  const [systemReducedMotion, setSystemReducedMotion] = useState(() =>
+    window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false)
   const [saved, setSaved] = useState(() => {
     try { return localStorage.getItem(saveKey) !== null } catch { return false }
   })
@@ -64,8 +72,20 @@ export function App() {
   const historyEnd = useRef<HTMLDivElement>(null)
   const boardKey = useRef(0)
   const state = current(match)
-  const actions = page === 'game' && !historyBusy ? legalActions(state) : []
-  const removals = mandatoryRemovals(state)
+  const config = match.config.mode === 'computer' ? match.config : undefined
+  const entry = config && difficulties[config.difficulty]
+  const aiTurn = !!config && !state.outcome && state.turn === config.computer
+  const reviewing = aiTurn && match.cursor < match.actions.length
+  const paced = !preferences.reducedMotion && !systemReducedMotion
+  const presenting = !!config && paced && events.length > 0
+  const presentingComputer = presenting && actor(events) === config?.computer
+  const aiEnabled = page === 'game' && aiTurn && !reviewing && !presenting && !historyBusy && !importBusy && !confirmation
+  const cpu = useComputerTurn(match, aiEnabled, boardKey.current, applyMove, workerFactory)
+  const blocked = historyBusy || aiTurn || presentingComputer
+  const actions = page === 'game' && !blocked ? legalActions(state) : []
+  const removals = blocked ? [] : mandatoryRemovals(state)
+  const undoCursor = decisionCursor(match.config, match.timeline, match.cursor, -1)
+  const redoCursor = decisionCursor(match.config, match.timeline, match.cursor, 1)
   const compatible = actions.filter((action): action is BattleAction =>
     action.type === 'battle' && action.remove === removed)
   const moving = compatible.filter(action => action.path?.[0] === selected && selected !== undefined)
@@ -84,6 +104,12 @@ export function App() {
     .map(describeEvent).join(' ')
 
   useEffect(() => {
+    const query = window.matchMedia?.('(prefers-reduced-motion: reduce)')
+    const update = () => setSystemReducedMotion(query?.matches ?? false)
+    query?.addEventListener('change', update)
+    return () => query?.removeEventListener('change', update)
+  }, [])
+  useEffect(() => {
     try { localStorage.setItem(preferencesKey, JSON.stringify(preferences)) } catch { /* persistence reports on save */ }
   }, [preferences])
   useEffect(() => {
@@ -97,9 +123,9 @@ export function App() {
 
   useEffect(() => {
     if (!events.length) return
-    const timer = window.setTimeout(() => setEvents([]), events.length * 85 + 360)
+    const timer = window.setTimeout(() => setEvents([]), paced ? events.length * 85 + 360 : 0)
     return () => window.clearTimeout(timer)
-  }, [events])
+  }, [events, paced])
 
   function clearSelection() {
     setSelected(undefined)
@@ -115,6 +141,7 @@ export function App() {
   }
 
   function beginReplay() {
+    cpu.invalidate()
     cancelReplay()
     clearFeedback()
     const request = new AbortController()
@@ -128,6 +155,7 @@ export function App() {
   }
 
   function show(next: Page) {
+    cpu.invalidate()
     cancelReplay()
     clearFeedback()
     if (page === 'menu' || page === 'game') setReturnTo(page)
@@ -141,20 +169,30 @@ export function App() {
     else action()
   }
 
-  function start() {
+  function start(config: MatchConfig = localConfig) {
+    cpu.invalidate()
     cancelReplay()
-    proceed('Start a new game?', () => {
-      setMatch(newMatch())
+    const create = () => {
+      setMatch(newMatch('white', config))
       setHistoryPage(0)
       boardKey.current++
       clearSelection()
       clearFeedback()
       setEvents([])
       setPage('game')
-    })
+    }
+    if (page === 'computer') create()
+    else proceed('Start a new game?', create)
+  }
+
+  function openComputer() {
+    cpu.invalidate()
+    cancelReplay()
+    proceed('Start a new computer game?', () => show('computer'))
   }
 
   function leave() {
+    cpu.invalidate()
     cancelReplay()
     proceed('Return to the main menu?', () => {
       setPage('menu')
@@ -164,15 +202,20 @@ export function App() {
     })
   }
 
-  function submit(action: Action) {
+  function applyMove(action: Action) {
+    const next = commit(match, action)
     cancelReplay()
+    setMatch(next)
+    setHistoryPage(0)
+    setEvents(next.timeline[next.cursor - 1]!)
+    clearFeedback()
+    clearSelection()
+  }
+
+  function submit(action: Action) {
+    if (blocked || state.outcome) return
     try {
-      const next = commit(match, action)
-      setMatch(next)
-      setHistoryPage(0)
-      setEvents(next.timeline[next.cursor - 1]!)
-      clearFeedback()
-      clearSelection()
+      applyMove(action)
     } catch {
       setError('That action is no longer legal. Choose another move.')
       clearSelection()
@@ -180,7 +223,7 @@ export function App() {
   }
 
   function square(at: Square) {
-    if (state.outcome || historyBusy) return
+    if (state.outcome || blocked) return
     if (state.phase === 'deployment') {
       const placement = actions.find(action => action.type === 'place' && action.at === at)
       if (placement) submit(placement)
@@ -204,14 +247,14 @@ export function App() {
     else if (compatible.some(action => action.path?.[0] === at)) setSelected(at)
   }
 
-  async function undoRedo(offset: number) {
+  async function undoRedo(cursor: number) {
     const signal = beginReplay()
     setHistoryBusy(true)
     setHistoryPage(0)
     clearSelection()
     setEvents([])
     try {
-      const next = await seekAsync(match, match.cursor + offset, signal)
+      const next = await seekAsync(match, cursor, signal)
       if (!signal.aborted) setMatch(next)
     } catch {
       if (!signal.aborted) setError('That position could not be restored.')
@@ -304,7 +347,12 @@ export function App() {
   const upload = <label className="button file-button">Import JSON<input type="file" accept=".json,application/json"
     onChange={event => { void readFile(event.currentTarget.files?.[0]); event.currentTarget.value = '' }} /></label>
 
-  const instruction = historyBusy ? 'Restoring position…' : hasOutcome ? 'Match complete' : state.phase === 'deployment' ? 'Place a counter on an empty square.'
+  const computerInstruction = reviewing ? 'Recorded computer turn. Use Redo to continue.'
+    : cpu.status === 'error' && aiEnabled ? 'Computer turn interrupted.'
+    : importBusy || confirmation || presenting ? 'Computer turn paused.'
+    : cpu.status === 'applying' ? 'Applying computer move…' : `${entry?.name} is thinking…`
+  const instruction = historyBusy ? 'Restoring position…' : hasOutcome ? 'Match complete'
+    : aiTurn ? computerInstruction : presentingComputer ? `${entry?.name} moved.` : state.phase === 'deployment' ? 'Place a counter on an empty square.'
     : terminalRemoval ? 'Confirm the final removal.'
     : removals.length > 0 && removed === undefined ? 'Choose an enemy prisoner to remove.'
     : proposal ? 'Review the marked leap path.'
@@ -334,9 +382,10 @@ export function App() {
         <div className="menu-copy">
           <p className="eyebrow">Ludus Latrunculorum</p>
           <h1>LATRVNCVLI</h1>
-          <p className="menu-intro">A Roman strategy game for two players at the same table.</p>
+          <p className="menu-intro">A Roman strategy game for two people at the same table or one player against the computer.</p>
           <div className="menu-actions">
-            <button className="button primary" onClick={start}>New local game <span aria-hidden="true">→</span></button>
+            <button className="button primary" onClick={() => start()}>New local game <span aria-hidden="true">→</span></button>
+            <button className="button" onClick={openComputer}>Play the computer</button>
             <button className="button" onClick={resume} disabled={!saved}>Continue saved game</button>
             <button className="button" onClick={() => show('guide')}>How to play</button>
             <button className="button" onClick={() => show('settings')}>Settings</button>
@@ -346,22 +395,28 @@ export function App() {
         </div>
       </section>}
 
-      {page === 'game' && <section className="match-shell" aria-label="Local game">
+      {page === 'computer' && <ComputerSetup onStart={start} onBack={() => setPage(returnTo)} />}
+      {page === 'game' && <section className="match-shell" aria-label={config ? 'Computer game' : 'Local game'}>
         <div className="turn-card">
           <p className="eyebrow">{hasOutcome ? 'Result' : removals.length > 0 ? 'Mandatory removal' : 'Current turn'}</p>
           <h2>{state.outcome ? state.outcome.winner ? `${playerName[state.outcome.winner]} wins` : 'Draw' : `${playerName[state.turn]} to play`}</h2>
+          {config && entry && <p className="match-assignment">You · {playerName[config.human]} <span aria-hidden="true">/</span> {entry.name} · {entry.designation} · {playerName[config.computer]}</p>}
           <p role="status">{state.outcome ? outcomeReason[state.outcome.reason] : instruction}</p>
+          {cpu.status === 'error' && aiEnabled && <div className="computer-error">
+            <p role="alert">{cpu.error}</p>
+            <button className="button compact" onClick={cpu.retry}>Retry computer turn</button>
+          </div>}
           {removed !== undefined && <p className="pending">Removal preview · {squareName(removed)}</p>}
           {proposal && <p className="pending">Path · {formatAction(proposal)}</p>}
           {(proposal || terminalRemoval) && <button className="button primary compact"
             onClick={() => submit((proposal ?? terminalRemoval)!)}>{terminalRemoval ? 'Confirm removal' : 'Confirm leap'}</button>}
           {(selected !== undefined || removed !== undefined || proposal) &&
             <button className="quiet cancel" onClick={clearSelection}>Cancel selection</button>}
-          {state.outcome && <button className="button primary compact" onClick={start}>New local game</button>}
+          {state.outcome && <button className="button primary compact" onClick={config ? openComputer : () => start()}>{config ? 'New computer game' : 'New local game'}</button>}
         </div>
         <div className="table-side">
           <div className="table-heading">
-            <div><p className="eyebrow">Local match <span aria-hidden="true">/</span> Seneca rules</p>
+            <div><p className="eyebrow">{config ? 'Computer match' : 'Local match'} <span aria-hidden="true">/</span> Seneca rules</p>
               <h1>{state.phase === 'deployment' ? 'Deployment' : 'Battle'}</h1>
             </div>
             {state.phase === 'deployment' && <div className="progress">
@@ -370,7 +425,7 @@ export function App() {
             </div>}
           </div>
           <Board key={boardKey.current} board={state.board} preferences={preferences} destinations={destinations}
-            removals={removals} selected={selected} pendingRemoval={removed} route={proposal?.path} last={last}
+            removals={removals} selected={selected} pendingRemoval={removed} route={proposal?.path ?? (presentingComputer && lastAction?.type === 'battle' ? lastAction.path : undefined)} last={last} locked={!!config && blocked}
             events={events} onSquare={square} onCancel={clearSelection} />
           <div className="board-footer">
             <span><i className="legend-dot" /> Legal destination</span>
@@ -403,15 +458,15 @@ export function App() {
                 onClick={() => setHistoryPage(historyPage - 1)}>Later moves</button>
             </div>}
             <div className="history-controls">
-              <button className="button compact" disabled={historyBusy || match.cursor === 0} onClick={() => { void undoRedo(-1) }}>↶ Undo</button>
-              <button className="button compact" disabled={historyBusy || match.cursor === match.actions.length} onClick={() => { void undoRedo(1) }}>↷ Redo</button>
+              <button className="button compact" disabled={historyBusy || undoCursor === match.cursor} onClick={() => { void undoRedo(undoCursor) }}>↶ Undo</button>
+              <button className="button compact" disabled={historyBusy || redoCursor === match.cursor} onClick={() => { void undoRedo(redoCursor) }}>↷ Redo</button>
             </div>
           </div>
           <div className="match-controls">
             <button className="button compact" onClick={save}>Save game</button>
             <button className="button compact" onClick={download}>Export JSON</button>
             {upload}
-            <button className="quiet" onClick={start}>New game</button>
+            <button className="quiet" onClick={config ? openComputer : () => start()}>New game</button>
             <button className="quiet" onClick={leave}>Exit to menu</button>
           </div>
           <p className="sr-only" aria-live="polite">{lastEvents?.map(describeEvent).join(' ')}</p>
