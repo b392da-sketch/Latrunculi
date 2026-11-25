@@ -1,5 +1,6 @@
 import type { Action } from '../engine/index.js'
 import type { Weights } from './features.js'
+import type { MoveSelection } from './selection.js'
 import type { StrategicWeights } from './strategic.js'
 
 export interface AiConfig {
@@ -8,6 +9,7 @@ export interface AiConfig {
   readonly seed?: number
   /** Optional caller-owned RNG, required to return a value in [0, 1). */
   readonly random?: () => number
+  readonly selection?: MoveSelection
   readonly tieBreak?: 'first' | 'seeded'
   readonly depth?: number
   /** Maximum number of successor states made using applyAction. */

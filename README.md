@@ -7,6 +7,7 @@ LATRVNCVLI implements the Locus Ludi Seneca reconstruction of Ludus Latrunculoru
 - [Engine API and architecture](docs/ARCHITECTURE.md)
 - [Frontend architecture, persistence, and screenshots](docs/FRONTEND.md)
 - [Headless AI architecture](docs/AI_ARCHITECTURE.md) and [M3.1 research](docs/AI_RESEARCH.md) and [M3.2 research](docs/M3_2_RESEARCH.md)
+- [AI difficulty presets](docs/AI_DIFFICULTIES.md) and [M3.3 calibration](docs/M3_3_RESEARCH.md)
 - [Roadmap](docs/ROADMAP.md) and [contributing](CONTRIBUTING.md)
 
 Use Node.js 24.
