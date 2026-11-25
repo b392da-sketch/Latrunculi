@@ -7,7 +7,7 @@ import type { AiConfig } from './types.js'
 
 type NamedOpponent = {
   readonly name: string
-  readonly config: Omit<AiConfig, 'random' | 'now' | 'shouldStop' | 'timeBudgetMs'>
+  readonly config: Omit<AiConfig, 'random' | 'now' | 'shouldStop'>
 }
 
 export interface TournamentOptions {

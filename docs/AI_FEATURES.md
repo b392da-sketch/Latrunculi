@@ -1,0 +1,20 @@
+# Strategic evaluation features
+
+M3.2 adds a separately configurable bonus to the M3.1 evaluation. Every new weight defaults to zero. The combined experimental preset and the positional deployment preset are exported for reproducible experiments. The M3.1 reference weights and terminal values remain unchanged. Values are from the requested player's perspective and reverse sign for the opponent.
+
+| Feature | Definition | Combined battle preset |
+| --- | --- | ---: |
+| `pressure` | For each active opposing counter, count friendly active counters with a geometric move within Manhattan distance two, and subtract nearby active opposition. Credit a positive surplus capped at three, requiring at least two friendly counters. This rewards local superiority with usable movement. | 2 |
+| `preparation` | Count a target with an active stationary mate and an empty closure gap. A different friendly counter must be able to reach an empty neighbor of the gap, and no immediate geometric closure may already exist for that target. This estimates a preparatory move. | 2 |
+| `closureDiversity` | Sum extra distinct origins that can reach a closure square without moving the stationary mate, capped at three extra origins per pair. Identical routes from the same origin count once. | 1 |
+| `initiative` | Minimum of the numbers of threatened targets, distinct closure squares, and distinct attacking origins that can reach those closures. This is a judgment about diverse available pressure. It does not establish independent forced threats or exhaust defensive replies. | 3 |
+| `escape` | Count active counters that have at least two distinct geometric landing squares. Enemy occupancy creates restrictions, but the safety of each landing is unresolved until replies are searched. | 1 |
+| `formation` | Find orthogonally connected components of active friendly counters. Credit up to four members of each component if at least two members can move. Fully jammed clusters earn no credit. | 1 |
+| `confinement` | When at most 12 counters remain and the side leads by actual removals, credit opposing edge or corner counters with at least two mobile friendly counters within distance two. A corner contributes two and a noncorner edge one. A losing side gets no bonus for creating immobilization. | 4 |
+| `repetitionRisk` | Penalize the material leader for visits beyond the first to the current equivalent boundary. Evaluate only live leaves. Canonical threefold remains a draw regardless of material. | 0 |
+
+Closure geometry and geometric paths use the existing engine board and movement routines. They include legal-shape chained leaps and friendly prisoners as hurdles. Geometry omits oscillator history, removal choices, future custody, and opponent replies. Search uses canonical full turns for all of those. A safe escape, a persistent threat, and a favorable sacrifice need reply analysis. There is no bonus for sacrifice or game length.
+
+The extractor enumerates representative geometric paths for both sides, builds origin and destination sets, and then makes bounded board passes for local pressure and connectivity. Active movement paths dominate the cost. The extractor is shared by individual ablations, so any nonzero strategic weight pays the shared analysis cost. Repetition risk adds a key lookup only when enabled. The benchmark reports observed costs by position. Tactical evaluation runs the M3.1 feature pass without this additional work when all strategic weights are zero.
+
+The positional deployment preset adds two each for `escape` and `formation` to the original M3.1 deployment evaluation. During deployment no prisoners are created and the new battle-only features report zero. Optional bounded opening search is separate. It can see an actual last-placement immobilization through the engine and use the battle evaluator after the phase transition. No weight rewards centrality by default. Opening simulations have too few terminal results to prefer a concentrated or distributed policy.

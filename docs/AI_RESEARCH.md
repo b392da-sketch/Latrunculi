@@ -107,3 +107,5 @@ Returning after the callback observed cancellation took 0.005–0.011 ms in thes
 2. Evaluate search around forced removal, rescue and chained threats with matched starts and time budgets. Add more exhaustive small-tree references before introducing selective depth extensions.
 3. Profile repetition-ledger transitions independently of evaluation. Any future cache must include enough history to preserve exact threefold outcomes, and cached positions should be checked against uncached search.
 4. Run larger held-out pairs for opening and mobility experiments and measure terminal results separately from truncated material. The current data cannot establish difficulty levels or ratings.
+
+M3.2 uses these results as the fixed reference. See [M3.2 research](M3_2_RESEARCH.md) for matched comparisons and the extended dry sequences.

@@ -1,5 +1,6 @@
 import type { Action } from '../engine/index.js'
 import type { Weights } from './features.js'
+import type { StrategicWeights } from './strategic.js'
 
 export interface AiConfig {
   readonly policy?: 'random' | 'legacy' | 'tactical' | 'search'
@@ -15,6 +16,12 @@ export interface AiConfig {
   readonly now?: () => number
   readonly shouldStop?: () => boolean
   readonly ordering?: boolean
+  readonly orderingStyle?: 'legacy' | 'phase'
+  readonly transition?: 'canonical' | 'overlay'
+  readonly tacticalExtensions?: number
+  readonly aspirationWindow?: number
+  readonly strategicWeights?: StrategicWeights
+  readonly positionalDeploymentWeights?: StrategicWeights
   readonly weights?: Weights
   readonly deploymentWeights?: Weights
 }
