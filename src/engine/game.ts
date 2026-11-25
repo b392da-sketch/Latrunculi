@@ -73,9 +73,14 @@ function finish(state: GameState, events: readonly GameEvent[], outcome: Outcome
   return { state: { ...state, outcome }, events: [...events, { type: 'termination', outcome }] }
 }
 
-function enterBattleBoundary(state: GameState, events: readonly GameEvent[]): Transition {
+type Ledger = GameState['repetitions']
+type RecordVisit = (ledger: Ledger, key: string) => Ledger
+
+const canonicalVisit: RecordVisit = (ledger, key) => ({ ...ledger, [key]: (ledger[key] ?? 0) + 1 })
+
+function enterBattleBoundary(state: GameState, events: readonly GameEvent[], recordVisit: RecordVisit): Transition {
   const key = positionKey(state)
-  const counted = { ...state, repetitions: { ...state.repetitions, [key]: (state.repetitions[key] ?? 0) + 1 } }
+  const counted = { ...state, repetitions: recordVisit(state.repetitions, key) }
   const outcome = boundaryOutcome(counted)
   return outcome ? finish(counted, events, outcome) : { state: counted, events }
 }
@@ -97,12 +102,17 @@ export function legalActions(state: GameState): Action[] {
 }
 
 export function applyAction(state: GameState, action: Action): Transition {
+  return applyWithVisitRecorder(state, action, canonicalVisit)
+}
+
+/** Internal traversal hook. Callers must preserve exact lookup and the supplied reset base. */
+export function applyWithVisitRecorder(state: GameState, action: Action, recordVisit: RecordVisit): Transition {
   if (state.outcome) throw new Error('The game has ended')
   if (state.phase === 'deployment') {
     if (action?.type !== 'place' || !validSquare(action.at)) throw new Error('Expected a placement')
     const placed = deploy(state, action.at)
     return placed.state.phase === 'battle'
-      ? enterBattleBoundary(placed.state, placed.events)
+      ? enterBattleBoundary(placed.state, placed.events, recordVisit)
       : placed
   }
 
@@ -141,5 +151,5 @@ export function applyAction(state: GameState, action: Action): Transition {
     repetitions: action.remove === undefined ? prepared.state.repetitions : {},
     turn: opponent(turn),
     movement: { ...movement, [turn]: moved },
-  }, events)
+  }, events, recordVisit)
 }
