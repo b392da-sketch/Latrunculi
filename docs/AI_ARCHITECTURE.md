@@ -48,3 +48,9 @@ The A0, A1, A2 and S1 objects in `referencePolicies` are frozen M3.1 defaults. N
 - `tacticalExtensions` adds up to four extra plies per line at the nominal frontier. A live battle frontier is unstable if the side to move has mandatory removal, or the incoming action liberated a counter or imprisoned two or more. The extension searches all legal complete replies, including all removal choices. It uses no stand-pat bound or speculative pruning. The selective horizon is exact relative to this bounded rule and approximate relative to deeper fixed-depth search. Geometric double threats alone do not trigger it, as the approximation cannot prove they survive replies.
 
 The overlay's lifetime is bounded by the search stack and depth plus extensions. No reversible make/unmake step, transposition table, or incremental hash is used. A full repetition-ledger cache key would be costly and sparse in these trees. A position-only table would be incorrect. Transposition tables, history and killer heuristics remain deferred. See the measured costs and ablations in [M3.2 research](M3_2_RESEARCH.md), and feature definitions in [AI features](AI_FEATURES.md).
+
+## M3.3 preset and protocol layer
+
+The immutable difficulty registry supplies budgets, evaluation weights and optional rank sampling to the shared search. Sampling happens only after evaluating actual engine successors. No policy changes legality, custody or terminal scoring. Existing control configurations opt into none of these additions.
+
+`handleAiRequest` exposes a serializable input and output contract for a future worker. It validates a full canonical snapshot and calls the same configured search with only supported resource overrides. For field definitions and cancellation behavior, see [AI difficulties](AI_DIFFICULTIES.md). For measured strength and timing evidence, see [M3.3 calibration](M3_3_RESEARCH.md).

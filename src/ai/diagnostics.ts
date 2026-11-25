@@ -17,6 +17,7 @@ export interface TournamentOptions {
   readonly cap: number
   readonly deployment?: 'shared-random' | 'by-policy'
   readonly now?: () => number
+  readonly startingActions?: readonly Action[]
 }
 
 function sharedDeployment(seed: number) {
@@ -41,6 +42,9 @@ function play(options: TournamentOptions, seed: number, swapped: boolean, openin
   const now = options.now ?? Date.now
   let state: GameState = options.deployment === 'by-policy' ? createGame() : opening.state
   const actions = options.deployment === 'by-policy' ? [] : opening.actions.slice()
+  const startingPly = actions.length
+  const usage = () => ({ turns: 0, nodes: 0, depth: 0, thinkMs: 0 })
+  const byColor = { white: usage(), black: usage() }
   const metrics = {
     battleTurns: 0, imprisonment: 0, liberation: 0, longestNoRemoval: 0,
     threatTurns: 0, threatWithoutCapture: 0, noContactTurns: 0, sparseTurns: 0,
@@ -54,6 +58,11 @@ function play(options: TournamentOptions, seed: number, swapped: boolean, openin
     if (!action) throw new Error(`No action for seed ${seed}, swap ${swapped}, turn ${actions.length}`)
     const { state: next, events } = applyAction(state, action)
     if (state.phase === 'battle') {
+      const cost = byColor[side]
+      cost.turns++
+      cost.nodes += diagnostics.nodes
+      cost.depth += diagnostics.completedDepth
+      cost.thinkMs += diagnostics.elapsedMs
       metrics.battleTurns++
       metrics.nodes += diagnostics.nodes
       metrics.evaluations += diagnostics.evaluations
@@ -86,14 +95,22 @@ function play(options: TournamentOptions, seed: number, swapped: boolean, openin
       white: state.board.filter(counter => counter?.owner === 'white' && counter.status === 'imprisoned').length,
       black: state.board.filter(counter => counter?.owner === 'black' && counter.status === 'imprisoned').length,
     },
-    metrics,
+    metrics, startingPly, byColor,
   }
 }
 
 export function* runTournament(options: TournamentOptions): Generator<ReturnType<typeof play>> {
   if (!Number.isSafeInteger(options.cap) || options.cap < 40) throw new RangeError('Tournament cap must be at least 40')
+  const start = options.startingActions
+  if (start && (options.deployment === 'by-policy' || start.length >= options.cap)) {
+    throw new RangeError('Targeted opening needs a compatible deployment and a continuation budget')
+  }
+  const targeted = start ? {
+    actions: start.slice(),
+    state: start.reduce((state, action) => applyAction(state, action).state, createGame()),
+  } : undefined
   for (const seed of options.seeds) {
-    const opening = sharedDeployment(seed)
+    const opening = targeted ?? sharedDeployment(seed)
     yield play(options, seed, false, opening)
     yield play(options, seed, true, opening)
   }

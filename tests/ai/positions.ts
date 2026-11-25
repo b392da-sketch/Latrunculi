@@ -4,20 +4,31 @@ import { randomFor } from '../../src/ai/index.js'
 import { battle, deployWith, move } from '../fixtures.js'
 import { deploymentLog, replay } from '../web-fixtures.js'
 
-export function seededPosition(seed: number, actions: number): GameState {
+export function seededLog(seed: number, actions: number): Action[] {
   let state = createGame()
   const random = randomFor(seed)
+  const log: Action[] = []
   for (let i = 0; i < actions; i++) {
     const moves = legalActions(state)
     if (!moves.length) throw new Error(`Seed ${seed} ended at action ${i}`)
-    state = applyAction(state, moves[Math.floor(random() * moves.length)]!).state
+    const action = moves[Math.floor(random() * moves.length)]!
+    state = applyAction(state, action).state
+    log.push(action)
   }
-  return state
+  return log
+}
+
+export function seededPosition(seed: number, actions: number): GameState {
+  return replay(seededLog(seed, actions))
+}
+
+export function multiplePrisonersLog(): Action[] {
+  const opening = deployWith(['c5', 'c2', 'e4'], ['c3', 'd4', 'h8'], ['c4', 'h7'])
+  return [...deploymentLog(opening), move('c5', 'c4'), move('h8', 'h7')]
 }
 
 export function multiplePrisoners(): GameState {
-  const opening = deployWith(['c5', 'c2', 'e4'], ['c3', 'd4', 'h8'], ['c4', 'h7'])
-  return replay([...deploymentLog(opening), move('c5', 'c4'), move('h8', 'h7')])
+  return replay(multiplePrisonersLog())
 }
 
 export function cyclePosition(plies: number): GameState {

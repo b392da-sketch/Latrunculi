@@ -5,6 +5,8 @@ import { legacyValue } from './legacy.js'
 import { ordered, sameAction } from './ordering.js'
 import { applyOverlay } from './overlay.js'
 import { makeStrategicBonus, strategicFeatureNames } from './strategic.js'
+import { sampleCandidate, validateSelection } from './selection.js'
+import type { Candidate } from './selection.js'
 import { randomFor } from './random.js'
 import type { AiConfig, AiDecision, AiDiagnostics } from './types.js'
 
@@ -51,6 +53,7 @@ export function chooseAction(state: GameState, config: AiConfig = {}): AiDecisio
   if (timeBudget !== undefined && (!Number.isFinite(timeBudget) || timeBudget < 0)) {
     throw new RangeError('Invalid AI time budget')
   }
+  if (config.selection) validateSelection(config.selection)
   const actions = legalActions(state)
   const firstUsableMs = Math.max(0, now() - start)
   const generator = config.random ?? randomFor(config.seed ?? 0)
@@ -104,20 +107,32 @@ export function chooseAction(state: GameState, config: AiConfig = {}): AiDecisio
 
   let stop: ReturnType<typeof stopped>
   if (mode !== 'search') {
+    const selection = state.phase === 'battle' ? config.selection : undefined
+    const scored: Candidate[] = []
     const best: Action[] = []
     let bestScore = -Infinity
     for (const candidate of actions) {
       stop = stopped()
       if (stop) break
       nodes++
-      const candidateScore = value(apply(state, candidate).state, 1)
+      const child = apply(state, candidate).state
+      const candidateScore = value(child, 1)
+      if (selection) scored.push({
+        action: candidate, score: candidateScore,
+        terminal: child.outcome?.winner === root ? 'win' : child.outcome?.winner ? 'loss' : null,
+      })
       if (candidateScore > bestScore) {
         bestScore = candidateScore
         best.length = 0
       }
       if (candidateScore === bestScore) best.push(candidate)
     }
-    if (best.length) {
+    if (selection && scored.length) {
+      const selected = sampleCandidate(scored, selection, random)
+      action = selected.action
+      score = selected.score
+      pv = [action]
+    } else if (best.length) {
       action = config.tieBreak === 'first' || (config.tieBreak === undefined && mode !== 'legacy')
         ? best[0]! : best[Math.floor(random() * best.length)]!
       score = bestScore
